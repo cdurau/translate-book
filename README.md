@@ -2,7 +2,7 @@
 
 English | [中文](README.zh-CN.md)
 
-Claude Code skill that translates entire books (PDF/DOCX/EPUB) into any language using parallel subagents.
+Codex skill that translates entire books (PDF/DOCX/EPUB) into any language using parallel subagents. The orchestration remains compatible with Claude Code and OpenClaw.
 
 > Inspired by [claude_translater](https://github.com/wizlijun/claude_translater). The original project uses shell scripts as its entry point, coordinating the Claude CLI with multiple step scripts to perform chunked translation. This project restructures the workflow as a Claude Code Skill, using subagents to translate chunks in parallel, with manifest-driven integrity checks, resumable runs, and multi-format output unified into a single pipeline. As the project structure and implementation differ significantly from the original, this is an independent project rather than a fork.
 
@@ -45,7 +45,7 @@ Each chunk gets its own independent subagent with a fresh context window. This p
 
 ## Prerequisites
 
-- **Claude Code CLI** — installed and authenticated
+- **Codex CLI** — installed and authenticated (Claude Code and OpenClaw are also supported)
 - **Calibre** — `ebook-convert` command must be available ([download](https://calibre-ebook.com/))
 - **Pandoc** — for HTML↔Markdown conversion ([download](https://pandoc.org/))
 - **Python 3** with:
@@ -56,37 +56,40 @@ Each chunk gets its own independent subagent with a fresh context window. This p
 
 ### 1. Install the skill
 
-**Option A: npx (recommended)**
+**Option A: Codex via Git clone (recommended)**
+
+```bash
+git clone https://github.com/deusyu/translate-book.git ~/.agents/skills/translate-book
+```
+
+Codex detects skills in this directory automatically. If it does not appear in
+the skill selector, restart Codex.
+
+**Option B: npx for Claude Code**
 
 ```bash
 npx skills add deusyu/translate-book -a claude-code -g
 ```
 
-**Option B: ClawHub**
+**Option C: ClawHub**
 
 ```bash
 clawhub install translate-book
 ```
 
-**Option C: Git clone**
-
-```bash
-git clone https://github.com/deusyu/translate-book.git ~/.claude/skills/translate-book
-```
-
 
 ### 2. Translate a book
 
-In Claude Code, say:
+In Codex, say:
 
 ```
-translate /path/to/book.pdf to Chinese
+translate /path/to/book.pdf to Chinese using parallel subagents
 ```
 
-Or use the slash command:
+Or invoke the skill explicitly:
 
 ```
-/translate-book translate /path/to/book.pdf to Japanese
+$translate-book translate /path/to/book.pdf to Japanese using parallel subagents
 ```
 
 The skill handles the full pipeline automatically — convert, chunk, translate in parallel, validate, merge, and build all output formats.
@@ -211,7 +214,7 @@ Then: merge → Pandoc HTML → inject TOC → Calibre generates DOCX, EPUB, PDF
 
 | File | Purpose |
 |------|---------|
-| `SKILL.md` | Claude Code skill definition — orchestrates the full pipeline |
+| `SKILL.md` | Codex-compatible skill definition — orchestrates the full pipeline |
 | `scripts/convert.py` | PDF/DOCX/EPUB → Markdown chunks via Calibre HTMLZ |
 | `scripts/manifest.py` | Chunk manifest: SHA-256 tracking and merge validation |
 | `scripts/glossary.py` | Glossary management: per-chunk term tables for consistent terminology |

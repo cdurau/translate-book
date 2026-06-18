@@ -1,8 +1,6 @@
 ---
 name: translate-book
-description: Translate books (PDF/DOCX/EPUB) into any language using parallel sub-agents. Converts input -> Markdown chunks -> translated chunks -> HTML/DOCX/EPUB/PDF.
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion
-metadata: {"openclaw":{"requires":{"bins":["python3","pandoc","ebook-convert"],"anyBins":["calibre","ebook-convert"]},"homepage":"https://github.com/deusyu/translate-book"}}
+description: Translate complete PDF, DOCX, or EPUB books into any target language with parallel sub-agents, glossary consistency, resumable chunk processing, validation, and HTML, DOCX, EPUB, and PDF output. Use when Codex is asked to translate a book or long-form ebook while preserving structure and formatting.
 ---
 
 # Book Translation Skill
@@ -23,6 +21,11 @@ Determine the following from the user's message:
 - **custom_instructions**: Any additional translation instructions from the user (optional)
 
 If the file path is not provided, ask the user.
+
+Codex only starts sub-agents when the user explicitly requests sub-agent or
+parallel-agent work. If the user has not done so, obtain confirmation before
+Step 4. Preprocessing may proceed first, but do not spawn translation agents
+without that confirmation.
 
 ### 2. Preprocess — Convert to Markdown Chunks
 
@@ -131,7 +134,7 @@ Launch chunks in batches to respect API rate limits:
 - Each batch: up to `concurrency` sub-agents in parallel (default: 8)
 - Wait for the current batch to complete before launching the next
 
-**Spawn each sub-agent with the following task.** Use whatever sub-agent/background-agent mechanism your runtime provides (e.g. the Agent tool, sessions_spawn, or equivalent).
+**Spawn each sub-agent with the following task.** In Codex, use `spawn_agent`; in other supported runtimes, use the equivalent sub-agent/background-agent mechanism. Never process more chunks concurrently than the runtime's available agent slots.
 
 The output file is `output_` prefixed to the source filename: `chunk0001.md` → `output_chunk0001.md`.
 

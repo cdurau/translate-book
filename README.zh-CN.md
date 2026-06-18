@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Claude Code Skill，使用并行 subagent 将整本书（PDF/DOCX/EPUB）翻译成任意语言。
+Codex Skill，使用并行 subagent 将整本书（PDF/DOCX/EPUB）翻译成任意语言；编排流程同时兼容 Claude Code 和 OpenClaw。
 
 > 本项目受 [claude_translater](https://github.com/wizlijun/claude_translater) 启发。原项目以 shell 脚本为入口，配合 Claude CLI 和多个步骤脚本完成分块翻译；本项目则将流程重构为 Claude Code Skill，使用 subagent 按 chunk 并行翻译，并引入 manifest 驱动的完整性校验，将续跑和多格式输出整合为更统一的流水线。由于项目结构和实现方式均与原项目不同，本项目为独立实现，而非 fork。
 
@@ -45,7 +45,7 @@ Calibre ebook-convert → HTMLZ → HTML → Markdown
 
 ## 前置要求
 
-- **Claude Code CLI** — 已安装并完成认证
+- **Codex CLI** — 已安装并完成认证（同时支持 Claude Code 和 OpenClaw）
 - **Calibre** — `ebook-convert` 命令可用（[下载](https://calibre-ebook.com/)）
 - **Pandoc** — 用于 HTML↔Markdown 转换（[下载](https://pandoc.org/)）
 - **Python 3**，需要：
@@ -56,37 +56,39 @@ Calibre ebook-convert → HTMLZ → HTML → Markdown
 
 ### 1. 安装 Skill
 
-**方式 A：npx（推荐）**
+**方式 A：通过 Git 安装到 Codex（推荐）**
+
+```bash
+git clone https://github.com/deusyu/translate-book.git ~/.agents/skills/translate-book
+```
+
+Codex 会自动发现此目录中的 Skill。如果 Skill 选择器中没有显示，请重启 Codex。
+
+**方式 B：通过 npx 安装到 Claude Code**
 
 ```bash
 npx skills add deusyu/translate-book -a claude-code -g
 ```
 
-**方式 B：ClawHub**
+**方式 C：ClawHub**
 
 ```bash
 clawhub install translate-book
 ```
 
-**方式 C：Git 克隆**
-
-```bash
-git clone https://github.com/deusyu/translate-book.git ~/.claude/skills/translate-book
-```
-
 
 ### 2. 翻译一本书
 
-在 Claude Code 中直接说：
+在 Codex 中直接说：
 
 ```
-translate /path/to/book.pdf to Chinese
+translate /path/to/book.pdf to Chinese using parallel subagents
 ```
 
-或使用斜杠命令：
+或显式调用 Skill：
 
 ```
-/translate-book translate /path/to/book.pdf to Japanese
+$translate-book translate /path/to/book.pdf to Japanese using parallel subagents
 ```
 
 Skill 自动处理完整流程 — 转换、拆分、并行翻译、校验、合并、生成所有输出格式。
@@ -211,7 +213,7 @@ python3 scripts/merge_and_build.py --temp-dir book_temp --title "《译后书名
 
 | 文件 | 用途 |
 |------|------|
-| `SKILL.md` | Claude Code Skill 定义 — 编排完整流程 |
+| `SKILL.md` | Codex 兼容的 Skill 定义 — 编排完整流程 |
 | `scripts/convert.py` | PDF/DOCX/EPUB → Markdown chunks（经 Calibre HTMLZ） |
 | `scripts/manifest.py` | Chunk manifest：SHA-256 追踪与合并校验 |
 | `scripts/glossary.py` | 术语表管理：为每个 chunk 生成专属术语对照表，保证全书译名一致 |
