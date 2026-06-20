@@ -5,6 +5,7 @@ Codex skill for translating complete PDF, DOCX, and EPUB books with parallel chu
 - Preserve document structure and formatting.
 - Keep terminology consistent across independent translation agents.
 - Support resumable, validated, multi-format builds.
+- Produce publication-quality prose while preserving author voice, navigation, covers, metadata, and links.
 ## Core Features
 Conversion, chunking, glossary injection, neighbor context, selective re-translation, manifest validation, and HTML/DOCX/EPUB/PDF output.
 ## Important Constraints
@@ -12,10 +13,12 @@ Conversion, chunking, glossary injection, neighbor context, selective re-transla
 - Keep `{baseDir}` in skill script paths.
 - Keep sub-agent tasks portable across supported runtimes.
 - Do not add mtime-based output rebuild logic.
+- Do not use the legacy Markdown rebuild for EPUB preservation or repair without explicit user acceptance of its limitations.
 ## Conventions
 Python scripts own deterministic state and validation; agents own translation and semantic glossary decisions.
 ## Key Files
 - `SKILL.md`: orchestration contract
+- `references/translation-quality-and-epub-preservation-policy.md`: mandatory translation and EPUB acceptance criteria
 - `scripts/convert.py`: input conversion and chunking
 - `scripts/run_state.py`: selective work planning
 - `scripts/merge_and_build.py`: merge and output generation

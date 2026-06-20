@@ -1,4 +1,4 @@
 interface:
   display_name: "Translate Book"
-  short_description: "Translate complete ebooks with parallel agents"
-  default_prompt: "Use $translate-book with parallel subagents to translate this ebook while preserving its structure and terminology."
+  short_description: "Translate and repair ebooks with preservation"
+  default_prompt: "Use $translate-book with parallel subagents to translate or repair this ebook with publication-quality prose while preserving its original EPUB structure."

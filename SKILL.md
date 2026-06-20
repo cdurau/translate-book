@@ -1,11 +1,15 @@
 ---
 name: translate-book
-description: Translate complete PDF, DOCX, or EPUB books into any target language with parallel sub-agents, glossary consistency, resumable chunk processing, validation, and HTML, DOCX, EPUB, and PDF output. Use when Codex is asked to translate a book or long-form ebook while preserving structure and formatting.
+description: Translate or repair complete PDF, DOCX, and EPUB books with publication-quality prose, author-voice and terminology consistency, resumable parallel processing, and structure-preserving EPUB handling for covers, metadata, CSS, navigation, links, and tables of contents. Use when Codex is asked to translate a book or long-form ebook, repair an already translated ebook, preserve an EPUB's original reading experience, or produce validated HTML, DOCX, EPUB, or PDF output.
 ---
 
 # Book Translation Skill
 
 You are a book translation assistant. You translate entire books from one language to another by orchestrating a multi-step pipeline.
+
+## Mandatory Quality and Preservation Policy
+
+Read and follow [Translation Quality and EPUB Preservation Policy](references/translation-quality-and-epub-preservation-policy.md) completely before preprocessing, translating, repairing, or rebuilding a book. Treat it as the governing acceptance criteria. If the requested output cannot meet it with the available tools, stop before destructive conversion and report the exact limitation.
 
 ## Workflow
 
@@ -19,13 +23,46 @@ Determine the following from the user's message:
 - **epub_cover**: Optional explicit cover image path for EPUB output
 - **export_name**: Optional filename stem for user-facing output aliases
 - **custom_instructions**: Any additional translation instructions from the user (optional)
+- **address_style**: Requested form of direct address, especially German informal `du` or formal `Sie`
+- **book_title** and **author**: Infer from source metadata when not supplied
+- **mode**: `translate`, `repair`, or `legacy_rebuild`
 
 If the file path is not provided, ask the user.
+
+Confirm that the user has the legal right to create the translated or modified copy. Do not remove attribution, rights, publisher, or copyright information.
+
+For German output, use the requested address style. If unspecified, infer it from the genre and source context, record the choice in `config.txt` or the run report, and keep it consistent.
 
 Codex only starts sub-agents when the user explicitly requests sub-agent or
 parallel-agent work. If the user has not done so, obtain confirmation before
 Step 4. Preprocessing may proceed first, but do not spawn translation agents
 without that confirmation.
+
+### 1.5. Select the Safe Processing Path
+
+- **EPUB translation**: use the structure-preserving EPUB path below. Do not run the Markdown rebuild path by default.
+- **EPUB repair**: use repair mode and compare the original EPUB with the translated EPUB. Preserve translated text and make only requested structural or language corrections.
+- **PDF/DOCX translation**: use the chunked Markdown workflow beginning at Step 2.
+- **Legacy EPUB rebuild**: use Steps 2–7 only when the user explicitly accepts that Calibre → HTMLZ → Markdown → EPUB cannot preserve the original EPUB package exactly.
+
+#### Structure-preserving EPUB path
+
+1. Copy the source EPUB to a working directory and unpack the copy. Never mutate the source file.
+2. Preserve the original package layout, XHTML files, CSS, images, fonts, filenames, classes, IDs, anchors, links, OPF manifest/spine, navigation files, and reading order.
+3. Build translation units from human-readable XHTML text and translatable accessibility attributes. Use stable placeholders or a reversible node map so subagents cannot alter markup, filenames, URLs, IDs, or anchors.
+4. Translate units with the glossary, title, author, address style, surrounding context, and the prompt principles in Step 4. Do not translate code, identifiers, legal metadata, URLs, ISBNs, or proper names unless clearly intended.
+5. Reinsert translated text into the same nodes. Preserve inline element boundaries and whitespace where they affect rendering.
+6. Translate visible title/subtitle, headings, visible TOC labels, `nav.xhtml` labels, and `toc.ncx` labels consistently. Update only appropriate title and language metadata; preserve identifiers, rights, author, publisher, and source metadata.
+7. Preserve or repair the original cover declaration and visible cover page. Do not replace or alter the image.
+8. Add a visible linked TOC only when missing, placing and styling it consistently with the original front matter. Make the smallest package changes required.
+9. Repack with `mimetype` first and uncompressed. Validate OPF/spine/navigation, every internal target, image presence, cover recognition, and EPUB validity. Use `epubcheck` when available and open the result in an available reader.
+10. Name the result as requested or use `<original_name>_<target_lang>.epub`.
+
+If safe text-node extraction/reinsertion, EPUB validation, or link verification is unavailable, do not silently fall back to the legacy Markdown rebuild. Explain the blocker and ask whether the user accepts legacy rebuild limitations.
+
+#### Repair mode
+
+Treat the original EPUB as the structure/formatting source and the translated EPUB as the translated-text source. Do not retranslate unless explicitly requested. Make the smallest requested changes and never regenerate from Markdown when package-level repair is possible.
 
 ### 2. Preprocess — Convert to Markdown Chunks
 
@@ -144,9 +181,12 @@ Each sub-agent receives:
 - The single chunk file it is responsible for
 - The temp directory path
 - The target language
+- The book title and author
+- The selected address style
 - The translation prompt (see below)
 - A per-chunk term table (see "Term table assembly" below)
 - Read-only neighboring chunk excerpts (see "Neighbor context assembly" below)
+- Formatting and markup-preservation requirements
 - Any custom instructions
 
 **Term table assembly** — before spawning a sub-agent, run:
@@ -213,14 +253,14 @@ Include this translation prompt in each sub-agent's instructions (replace `{TARG
 
 ---
 
-请翻译markdown文件为 {TARGET_LANGUAGE}.
+请将 markdown 文件忠实、自然地翻译为 {TARGET_LANGUAGE}，使译文达到出版质量，并保留作者的语气、节奏、情感、文体和修辞重点。
 IMPORTANT REQUIREMENTS:
 1. 严格保持 Markdown 格式不变，包括标题、链接、图片引用等
 2. 仅翻译文字内容，保留所有 Markdown 语法和文件名
 3. 删除空链接、不必要的字符和如: 行末的'\\'。页码已由 convert.py 上游处理，不要再删除独立的数字行（可能是年份 1984、章节编号、引用编号等正文内容）。
-4. 保证格式和语义准确翻译内容自然流畅
+4. 译文必须自然、流畅、地道，同时忠实保留原意、语气、幽默、正式程度和作者独特文风；不要逐字硬译
 5. 只输出翻译后的正文内容，不要有任何说明、提示、注释或对话内容。
-6. 表达清晰简洁，不要使用复杂的句式。请严格按顺序翻译，不要跳过任何内容。
+6. 严格按顺序翻译，不要跳过任何内容。不要总结、缩写、扩写、审查、现代化、简化或自由改写；保留原文句式复杂度和节奏。
 7. 必须保留所有图片引用，包括：
    - 所有 ![alt](path) 格式的图片引用必须完整保留
    - 图片文件名和路径不要修改（如 media/image-001.png）
@@ -241,27 +281,10 @@ IMPORTANT REQUIREMENTS:
 
      - 错误示例：`alt="爱丽丝拿着标着"喝我"的瓶子"` ← 内层英文 `"` 把外层 alt 撑断了
      - 正确示例：`alt="爱丽丝拿着标着“喝我”的瓶子"` 或 `alt="爱丽丝拿着标着&quot;喝我&quot;的瓶子"`
-8. 智能识别和处理多级标题，按照以下规则添加markdown标记：
-   - 主标题（书名、章节名等）使用 # 标记
-   - 一级标题（大节标题）使用 ## 标记
-   - 二级标题（小节标题）使用 ### 标记
-   - 三级标题（子标题）使用 #### 标记
-   - 四级及以下标题使用 ##### 标记
-9. 标题识别规则：
-   - 独立成行的较短文本（通常少于50字符）
-   - 具有总结性或概括性的语句
-   - 在文档结构中起到分隔和组织作用的文本
-   - 字体大小明显不同或有特殊格式的文本
-   - 数字编号开头的章节文本（如 "1.1 概述"、"第三章"等）
-10. 标题层级判断：
-    - 根据上下文和内容重要性判断标题层级
-    - 章节类标题通常为高层级（# 或 ##）
-    - 小节、子节标题依次降级（### #### #####）
-    - 保持同一文档内标题层级的一致性
-11. 注意事项：
-    - 不要过度添加标题标记，只对真正的标题文本添加
-    - 正文段落不要添加标题标记
-    - 如果原文已有markdown标题标记，保持其层级结构
+8. 严格保留原有标题及其 Markdown 层级。不要把普通段落改成标题，不要发明、拆分、合并、重排或重命名标题。
+9. 不要添加 `[Chapter]`、`[Kapitel]`、`[Section]`、`[Abschnitt]`、方括号标签、摘要、译者注、AI 评论、代码围栏、chunk 标记或其他原文不存在的内容。
+10. 保留段落、列表、引用、粗体、斜体、表格、脚注、尾注、题注、场景分隔和分页语义。不要删除图片。
+11. 书名：{BOOK_TITLE}；作者：{AUTHOR}；称谓方式：{ADDRESS_STYLE}。直接称呼读者时必须始终使用指定方式；未指定时遵循主 agent 已记录的统一选择。
 12. {CUSTOM_INSTRUCTIONS if provided}
 13. 术语一致性：以下术语必须严格使用指定译法，不要自行变换。表格中"原文"列**或"别名"列**任一形式出现在正文中时，都必须翻译为"译文"列对应的形式。
 
@@ -367,6 +390,8 @@ Severity rules (none of these fail the run — meta is non-blocking):
 
 Report any chunks that failed translation after retry.
 
+Run a complete-book consistency and artifact pass before building. Check author voice, address style, untranslated body text, glossary terms, chapter-title consistency, duplicate headings, artificial bracket labels, stray code fences, chunk markers, image references, and Markdown damage. Correct only confirmed issues; do not normalize genuine stylistic variation.
+
 ### 6. Translate Book Title
 
 Read `config.txt` from the temp directory to get the `original_title` field.
@@ -374,6 +399,8 @@ Read `config.txt` from the temp directory to get the `original_title` field.
 Translate the title to the target language. For Chinese, wrap in 书名号: `《translated_title》`.
 
 ### 7. Post-process — Merge and Build
+
+This is the Markdown rebuild path. Do not use it for structure-preserving EPUB translation or repair unless the user explicitly accepted legacy rebuild limitations in Step 1.5.
 
 Run the build script with the translated title:
 
