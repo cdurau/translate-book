@@ -17,6 +17,7 @@ None.
 - Converted the skill frontmatter and UI metadata for Codex discovery.
 - Added Codex installation and invocation documentation.
 - Added a mandatory translation-quality policy, EPUB preservation/repair routing, address-style consistency, and a stricter subagent translation prompt.
+- Updated both READMEs and architecture documentation to distinguish the implemented legacy rebuild from the not-yet-implemented structure-preserving EPUB toolchain.
 ## Current Blockers
 None.
 ## Next Steps

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Codex Skill，使用并行 subagent 将整本书（PDF/DOCX/EPUB）翻译成任意语言；编排流程同时兼容 Claude Code 和 OpenClaw。
+Codex Skill，使用并行 subagent、共享术语表和出版级翻译规则翻译或修复整本书（PDF/DOCX/EPUB）；编排流程同时兼容 Claude Code 和 OpenClaw。
 
 > 本项目受 [claude_translater](https://github.com/wizlijun/claude_translater) 启发。原项目以 shell 脚本为入口，配合 Claude CLI 和多个步骤脚本完成分块翻译；本项目则将流程重构为 Claude Code Skill，使用 subagent 按 chunk 并行翻译，并引入 manifest 驱动的完整性校验，将续跑和多格式输出整合为更统一的流水线。由于项目结构和实现方式均与原项目不同，本项目为独立实现，而非 fork。
 
@@ -10,25 +10,16 @@ Codex Skill，使用并行 subagent 将整本书（PDF/DOCX/EPUB）翻译成任�
 
 ## 工作原理
 
+```text
+PDF / DOCX ──→ Calibre → HTMLZ → Markdown chunks → 并行翻译
+                    → manifest/术语表校验 → HTML / DOCX / EPUB / PDF
+
+EPUB 翻译 ──→ 保留原始包结构，仅翻译文本节点
+EPUB 修复 ──→ 对照原始结构与现有译文
+             → 仅修复封面、元数据、目录、链接或伪影
 ```
-输入文件 (PDF/DOCX/EPUB)
-  │
-  ▼
-Calibre ebook-convert → HTMLZ → HTML → Markdown
-  │
-  ▼
-拆分为 chunk（chunk0001.md, chunk0002.md, ...）
-  │  manifest.json 记录每个 chunk 的 SHA-256 hash
-  ▼
-并行 subagent 翻译（默认 8 路并发）
-  │  每个 subagent：读取 1 个 chunk → 翻译 → 写入 output_chunk*.md
-  │  分批执行，控制 API 速率
-  ▼
-校验（manifest hash 比对，源文件↔输出文件 1:1 匹配）
-  │
-  ▼
-合并 → Pandoc → HTML（含目录）→ Calibre → DOCX / EPUB / PDF
-```
+
+仓库中的 Python 脚本目前只实现了 Markdown 分块重建路径。Skill 和 Policy 已定义保留结构的 EPUB 路径，但确定性的 XHTML 提取/回填、链接校验和 EPUB 重新打包工具尚未实现。当用户要求保留或修复 EPUB 时，Skill 不得静默使用有损的 Markdown 重建路径。
 
 每个 chunk 由独立的 subagent 翻译，拥有全新的上下文窗口。这避免了单次会话翻译整本书时的上下文堆积和输出截断问题。
 
@@ -38,16 +29,19 @@ Calibre ebook-convert → HTMLZ → HTML → Markdown
 - **可续跑 + 精确重译** — chunk 级续跑，并用 `run_state.json` 追踪受术语表影响的重译范围
 - **邻居上下文** — 每个 chunk 可读取相邻 chunk 的短只读摘录，用于代词和实体判断
 - **Manifest 校验** — SHA-256 hash 追踪，防止过时或损坏的输出被合并
+- **出版级翻译 Policy** — 保留原意、作者声音、语气、节奏、正式程度和直接称谓方式
+- **EPUB 保留与修复 Policy** — 保留包结构、CSS、图片、封面、元数据、导航和链接，并以最小改动修复已翻译 EPUB
 - **多格式输出** — HTML（含浮动目录）、DOCX、EPUB、PDF
 - **可选输出控制** — 显式 EPUB 封面、自定义 temp root、面向用户的导出别名
 - **多语言** — zh、en、ja、ko、fr、de、es（可扩展）
-- **多格式输入** — PDF/DOCX/EPUB，Calibre 负责格式转换
+- **多格式输入** — PDF/DOCX 使用已实现的 Calibre/Markdown 流水线；需要保留结构的 EPUB 使用独立 Policy 路径
 
 ## 前置要求
 
 - **Codex CLI** — 已安装并完成认证（同时支持 Claude Code 和 OpenClaw）
 - **Calibre** — `ebook-convert` 命令可用（[下载](https://calibre-ebook.com/)）
 - **Pandoc** — 用于 HTML↔Markdown 转换（[下载](https://pandoc.org/)）
+- **EPUBCheck** — 建议用于校验保留结构的 EPUB 输出
 - **Python 3**，需要：
   - `pypandoc` — 必需（`pip install pypandoc`）
   - `beautifulsoup4` — 可选，用于更好的目录生成（`pip install beautifulsoup4`）
@@ -91,11 +85,19 @@ translate /path/to/book.pdf to Chinese using parallel subagents
 $translate-book translate /path/to/book.pdf to Japanese using parallel subagents
 ```
 
-Skill 自动处理完整流程 — 转换、拆分、并行翻译、校验、合并、生成所有输出格式。
+对于 PDF/DOCX，Skill 自动执行已实现的完整流程：转换、拆分、并行翻译、校验、合并并生成输出格式。
+
+如果 EPUB 必须保留原始阅读体验，请明确提出保留要求，例如：
+
+```
+$translate-book translate /path/to/book.epub to German using parallel subagents; preserve the original EPUB structure and use informal du address
+```
+
+Skill 会遵循 Preservation Policy；所需 EPUB 工具不可用时会报告阻塞，而不是静默回退到有损的 Markdown 重建路径。
 
 ### 3. 查看输出
 
-所有文件在 `{book_name}_temp/` 目录下：
+已实现的 Markdown 流水线会将以下文件写入 `{book_name}_temp/`：
 
 | 文件 | 说明 |
 |------|------|
@@ -111,7 +113,9 @@ Skill 自动处理完整流程 — 转换、拆分、并行翻译、校验、合
 - 完整流水线跑出来的产物统一放在 `tests/.artifacts/`，不提交到版本库。
 - 由于 `scripts/convert.py` 会把 `{book_name}_temp/` 写到**当前工作目录**下，仓库内的 baseline 测试应从 `tests/.artifacts/` 目录里启动，这样生成文件不会散落到仓库根目录。
 
-### 完整基准测试示例
+### Legacy 重建基准测试示例
+
+该回归测试有意覆盖现有的 EPUB → Markdown → 重建 EPUB 流水线，不验证原始 EPUB 包结构是否得到保留。
 
 ```bash
 mkdir -p tests/.artifacts
@@ -134,7 +138,17 @@ Pull request 不是首选贡献入口，可能会被关闭并转为 issue 继续
 - 尽量小的复现步骤，或可公开使用的小样本文件
 - 能说明问题的日志、截图或生成文件名
 
-## 流程详解
+## 翻译质量与 EPUB 结构保留
+
+强制 Policy 位于 [`references/translation-quality-and-epub-preservation-policy.md`](references/translation-quality-and-epub-preservation-policy.md)。它要求译文自然地道，保留作者声音和德语称谓方式，保持术语一致，并以语境感知方式清理转换伪影。
+
+翻译 EPUB 时，原始包是 XHTML、CSS、文件名、class、ID、anchor、图片、封面声明、OPF manifest/spine、阅读顺序、`nav.xhtml` 和 `toc.ncx` 的事实来源。应尽可能只翻译可读文本节点，并保留或修复可见目录和阅读器导航目录，校验所有内部目标。
+
+修复模式将原始 EPUB 视为结构/格式来源，将已翻译 EPUB 视为译文来源。只进行用户要求的最小改动；可以在包级修复时，不重新翻译，也不通过 Markdown 重建。
+
+**当前实现边界：**仓库尚未包含该保留包结构路径的确定性工具。`scripts/convert.py` 和 `scripts/merge_and_build.py` 实现的是下述 Legacy 重建路径。只有在明确接受结构损失风险后，才应对 EPUB 使用该路径。
+
+## Legacy Markdown 流水线详情
 
 ### 第一步：转换
 
@@ -142,7 +156,7 @@ Pull request 不是首选贡献入口，可能会被关闭并转为 issue 继续
 python3 scripts/convert.py /path/to/book.pdf --olang zh
 ```
 
-Calibre 将输入文件转为 HTMLZ，解压后转为 Markdown，再拆分为 chunk（每个约 6000 字符）。`manifest.json` 记录每个源 chunk 的 SHA-256 hash，用于后续校验。
+Calibre 将输入文件转为 HTMLZ，解压后转为 Markdown，再拆分为 chunk（每个约 6000 字符）。`manifest.json` 记录每个源 chunk 的 SHA-256 hash，用于后续校验。对于 EPUB 输入，这是有损重建路径：无法保证保留原始 XHTML 文件、CSS、OPF spine、导航、anchor 或封面声明。
 
 默认工作目录是当前目录下的 `{book_name}_temp/`。如果要换父目录，可使用 `--temp-root /path/to/work`；叶子目录名仍保持 `{book_name}_temp/`。
 
@@ -198,7 +212,7 @@ python3 scripts/merge_and_build.py --temp-dir book_temp --title "《译后书名
 python3 scripts/merge_and_build.py --temp-dir book_temp --title "《译后书名》" --cover cover.jpg --export-name "译后书名"
 ```
 
-`--cover` 会把显式封面图传给 EPUB 的 Calibre 步骤。`--export-name` 会额外生成如 `译后书名.epub` 的别名副本，同时保留内部 canonical 的 `book.*` 产物。
+`--cover` 会把显式封面图传给 Legacy EPUB 的 Calibre 步骤。`--export-name` 会额外生成如 `译后书名.epub` 的别名副本，同时保留内部 canonical 的 `book.*` 产物。这些参数不会使 Legacy 重建变成保留结构的 EPUB 工作流。
 
 合并前校验：
 - 每个源 chunk 都有对应的输出文件（1:1 匹配）
@@ -214,6 +228,7 @@ python3 scripts/merge_and_build.py --temp-dir book_temp --title "《译后书名
 | 文件 | 用途 |
 |------|------|
 | `SKILL.md` | Codex 兼容的 Skill 定义 — 编排完整流程 |
+| `references/translation-quality-and-epub-preservation-policy.md` | 强制翻译质量、EPUB 保留、修复和校验标准 |
 | `scripts/convert.py` | PDF/DOCX/EPUB → Markdown chunks（经 Calibre HTMLZ） |
 | `scripts/manifest.py` | Chunk manifest：SHA-256 追踪与合并校验 |
 | `scripts/glossary.py` | 术语表管理：为每个 chunk 生成专属术语对照表，保证全书译名一致 |
@@ -237,6 +252,7 @@ python3 scripts/merge_and_build.py --temp-dir book_temp --title "《译后书名
 | `Missing source chunk` | 源文件被删除 — 重新运行 `convert.py` 重新生成 |
 | 翻译不完整 | 重新运行 Skill，会从中断处继续 |
 | 修改标题、模板或图片后输出未更新 | 删除 temp 目录中的 `output.md`、`book*.html`、`book.docx`、`book.epub`、`book.pdf`，然后重跑 `merge_and_build.py` |
+| 需要保留或修复原始 EPUB 包 | 不得静默运行 Markdown 重建。调用 Skill 的 preservation/repair 模式；在确定性 EPUB 工具实现前，Skill 必须报告不可用能力，或要求用户明确接受 Legacy 重建的限制。 |
 | 想去掉 PDF 输出中的页码 | 默认会自动识别单调递增的页码序列（如 `1, 2, 3, ...`）并删除，同时保留年份（`1984`）、章节编号、引用编号等离散的独立数字行。若识别不到你的页码格式，可给 `convert.py` 加 `--strip-page-numbers`，强制删除所有独立数字行。该标志在检测到已缓存的 `input.md` 或 `chunk*.md` 时会直接报错 — 需先删除这些缓存，标志才会生效 |
 | `output.md exists but manifest invalid` | 旧输出已过时 — 脚本会自动删除并重新合并 |
 | `Glossary upgrade rejected: duplicate source` | v2 不允许两个术语共用同一个 source/alias 表面词。手工编辑 `glossary.json` 消歧（例如把一个 source 从 `Apple` 改为 `Apple (Inc.)`）后重新加载。 |
@@ -244,7 +260,7 @@ python3 scripts/merge_and_build.py --temp-dir book_temp --title "《译后书名
 
 ## 后续规划
 
-跟踪 [issue #7](https://github.com/deusyu/translate-book/issues/7) — chunk 之间的人名/术语不一致以及代词/性别错误。当前流水线已覆盖高频实体、别名/拼写漂移、相邻 chunk 的代词上下文，以及术语表变更后的精确重译。整书自然度校验仍是后续质量阶段。整体方案分为四个可独立交付的阶段。
+跟踪 [issue #7](https://github.com/deusyu/translate-book/issues/7) — chunk 之间的人名/术语不一致以及代词/性别错误。当前流水线已覆盖高频实体、别名/拼写漂移、相邻 chunk 的代词上下文，以及术语表变更后的精确重译。Skill 现在要求整书一致性检查；确定性的整书语言校验仍是后续工作。整体方案分为四个可独立交付的阶段。
 
 ### 设计原则
 
@@ -275,7 +291,8 @@ Phase 1 让术语表按批次增长,因此第一批看到的术语表最小,drif
 
 最近几轮 PR 讨论也暴露出一些有价值的工作流改进,但它们都不属于“一次性小补丁”：会触及仓库契约（产物命名、temp-dir 行为、清理语义、或 EPUB 兼容性边界）。当前状态：
 
-- **显式 EPUB 封面支持（已发布）**。`merge_and_build.py --cover <image>` 会在 HTML -> EPUB 的 Calibre 步骤透传封面图。`--cover-from <epub>` / EPUB 封面自动提取仍不纳入当前范围,等项目准备好承担不同 EPUB 包布局的解析兼容性后再考虑。(context: closed #3)
+- **Legacy 重建的显式 EPUB 封面支持（已发布）**。`merge_and_build.py --cover <image>` 会在 HTML → EPUB 的 Calibre 步骤透传封面图。自动保留/恢复输入 EPUB 的包级封面声明属于尚未实现的保留结构路径。(context: closed #3)
+- **确定性的 EPUB 结构保留工具（计划中）**。实现 XHTML 文本节点提取/回填、封面和元数据保留、可见目录与导航目录修复、链接校验，以及符合标准的 EPUB 重新打包。
 - **可配置的 temp 工作目录位置（已发布）**。`convert.py --temp-root <dir>` 保留默认 cwd-local `{book_name}_temp/` 行为，只有显式传参时才改变父目录。(context: closed #4)
 - **更安全的 Calibre/Pandoc 噪声清理（部分已发布）**。页码和 Calibre marker 清理已有回归测试保护，保留年份、章节编号和非单调独立数字。后续清理规则继续在测试下增量增加。(context: closed #5)
 - **可选的面向用户导出文件名（已发布）**。`merge_and_build.py --export-name <stem>` 生成 alias/copy，同时流水线内部 canonical 产物仍保持 `book.html`、`book_doc.html`、`book.docx`、`book.epub`、`book.pdf`。(context: closed #6)

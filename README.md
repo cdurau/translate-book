@@ -2,7 +2,7 @@
 
 English | [中文](README.zh-CN.md)
 
-Codex skill that translates entire books (PDF/DOCX/EPUB) into any language using parallel subagents. The orchestration remains compatible with Claude Code and OpenClaw.
+Codex skill that translates or repairs entire books (PDF/DOCX/EPUB) using parallel subagents, a shared glossary, and publication-quality translation rules. The orchestration remains compatible with Claude Code and OpenClaw.
 
 > Inspired by [claude_translater](https://github.com/wizlijun/claude_translater). The original project uses shell scripts as its entry point, coordinating the Claude CLI with multiple step scripts to perform chunked translation. This project restructures the workflow as a Claude Code Skill, using subagents to translate chunks in parallel, with manifest-driven integrity checks, resumable runs, and multi-format output unified into a single pipeline. As the project structure and implementation differ significantly from the original, this is an independent project rather than a fork.
 
@@ -10,25 +10,16 @@ Codex skill that translates entire books (PDF/DOCX/EPUB) into any language using
 
 ## How It Works
 
+```text
+PDF / DOCX ──→ Calibre → HTMLZ → Markdown chunks → parallel translation
+                    → manifest/glossary validation → HTML / DOCX / EPUB / PDF
+
+EPUB translation ──→ preserve the original package and translate text nodes
+EPUB repair ────────→ compare original structure with translated text
+                    → repair cover, metadata, TOCs, links, or artifacts only
 ```
-Input (PDF/DOCX/EPUB)
-  │
-  ▼
-Calibre ebook-convert → HTMLZ → HTML → Markdown
-  │
-  ▼
-Split into chunks (chunk0001.md, chunk0002.md, ...)
-  │  manifest.json tracks chunk hashes
-  ▼
-Parallel subagents (8 concurrent by default)
-  │  each subagent: read 1 chunk → translate → write output_chunk*.md
-  │  batched to respect API rate limits
-  ▼
-Validate (manifest hash check, 1:1 source↔output match)
-  │
-  ▼
-Merge → Pandoc → HTML (with TOC) → Calibre → DOCX / EPUB / PDF
-```
+
+The bundled Python scripts currently implement the chunked Markdown rebuild path. The structure-preserving EPUB path is defined by the skill and its policy, but deterministic XHTML extraction/reinsertion, link validation, and package rebuilding helpers are not implemented yet. The skill must not silently use the lossy Markdown rebuild when EPUB preservation or repair is required.
 
 Each chunk gets its own independent subagent with a fresh context window. This prevents context accumulation and output truncation that happen when translating a full book in a single session.
 
@@ -38,16 +29,19 @@ Each chunk gets its own independent subagent with a fresh context window. This p
 - **Resumable + selective re-translation** — chunk-level resume, with `run_state.json` tracking glossary-sensitive re-translation
 - **Neighbor context** — each chunk can see short read-only excerpts from adjacent chunks for pronoun and entity resolution
 - **Manifest validation** — SHA-256 hash tracking prevents stale or corrupt outputs from being merged
+- **Publication-quality translation policy** — preserves meaning, author voice, tone, rhythm, formality, and direct-address style
+- **EPUB preservation and repair policy** — preserves package structure, CSS, images, covers, metadata, navigation, and links; repairs translated EPUBs with minimal changes
 - **Multi-format output** — HTML (with floating TOC), DOCX, EPUB, PDF
 - **Optional output controls** — explicit EPUB cover, custom temp root, and user-facing export aliases
 - **Multi-language** — zh, en, ja, ko, fr, de, es (extensible)
-- **PDF/DOCX/EPUB input** — Calibre handles the conversion heavy lifting
+- **PDF/DOCX/EPUB input** — PDF and DOCX use the implemented Calibre/Markdown pipeline; preservation-sensitive EPUB work uses the separate policy path
 
 ## Prerequisites
 
 - **Codex CLI** — installed and authenticated (Claude Code and OpenClaw are also supported)
 - **Calibre** — `ebook-convert` command must be available ([download](https://calibre-ebook.com/))
 - **Pandoc** — for HTML↔Markdown conversion ([download](https://pandoc.org/))
+- **EPUBCheck** — recommended for validating structure-preserving EPUB output
 - **Python 3** with:
   - `pypandoc` — required (`pip install pypandoc`)
   - `beautifulsoup4` — optional, for better TOC generation (`pip install beautifulsoup4`)
@@ -92,11 +86,19 @@ Or invoke the skill explicitly:
 $translate-book translate /path/to/book.pdf to Japanese using parallel subagents
 ```
 
-The skill handles the full pipeline automatically — convert, chunk, translate in parallel, validate, merge, and build all output formats.
+For PDF/DOCX, the skill handles the implemented pipeline automatically: convert, chunk, translate in parallel, validate, merge, and build the output formats.
+
+For an EPUB that must retain its original reading experience, ask explicitly for preservation, for example:
+
+```
+$translate-book translate /path/to/book.epub to German using parallel subagents; preserve the original EPUB structure and use informal du address
+```
+
+The skill follows the preservation policy and reports a blocker instead of silently falling back to the lossy Markdown rebuild when the required EPUB tooling is unavailable.
 
 ### 3. Find your outputs
 
-All files are in `{book_name}_temp/`:
+The implemented Markdown pipeline writes these files to `{book_name}_temp/`:
 
 | File | Description |
 |------|-------------|
@@ -112,7 +114,9 @@ All files are in `{book_name}_temp/`:
 - Generated full-pipeline outputs live under `tests/.artifacts/` and should not be committed.
 - Because `scripts/convert.py` writes `{book_name}_temp/` under the current working directory, run repository baseline tests from inside `tests/.artifacts/` to keep generated files out of the repo root.
 
-### Full-Pipeline Baseline Example
+### Legacy Rebuild Baseline Example
+
+This regression test intentionally exercises the existing EPUB → Markdown → rebuilt EPUB pipeline. It does not verify preservation of the original EPUB package.
 
 ```bash
 mkdir -p tests/.artifacts
@@ -135,7 +139,17 @@ A useful issue should include:
 - Minimal reproduction steps or a small public-domain sample when possible
 - Logs, screenshots, or generated file names that show the failure
 
-## Pipeline Details
+## Translation Quality and EPUB Preservation
+
+The mandatory policy is stored in [`references/translation-quality-and-epub-preservation-policy.md`](references/translation-quality-and-epub-preservation-policy.md). It requires natural, idiomatic prose; preservation of author voice and German address style; consistent glossary terms; and context-aware cleanup of conversion artifacts.
+
+For EPUB translation, the original package is the source of truth for XHTML, CSS, filenames, classes, IDs, anchors, images, cover declarations, OPF manifest/spine, reading order, `nav.xhtml`, and `toc.ncx`. Translate human-readable text nodes only where possible. Preserve or repair visible and reader-navigation TOCs and verify every internal target.
+
+Repair mode uses the original EPUB as the structure/formatting source and the translated EPUB as the translated-text source. It makes only requested changes and does not retranslate or rebuild from Markdown when package-level repair is possible.
+
+**Current implementation boundary:** the repository does not yet include deterministic helpers for this package-preserving path. `scripts/convert.py` and `scripts/merge_and_build.py` implement the legacy rebuild path below. Use that path for EPUB only after explicitly accepting its structural limitations.
+
+## Legacy Markdown Pipeline Details
 
 ### Step 1: Convert
 
@@ -143,7 +157,7 @@ A useful issue should include:
 python3 scripts/convert.py /path/to/book.pdf --olang zh
 ```
 
-Calibre converts the input to HTMLZ, which is extracted and converted to Markdown, then split into chunks (~6000 chars each). A `manifest.json` records the SHA-256 hash of each source chunk for later validation.
+Calibre converts the input to HTMLZ, which is extracted and converted to Markdown, then split into chunks (~6000 chars each). A `manifest.json` records the SHA-256 hash of each source chunk for later validation. For EPUB input this is a lossy rebuild path: it cannot guarantee preservation of the original XHTML files, CSS, OPF spine, navigation, anchors, or cover declarations.
 
 By default the working directory is `{book_name}_temp/` under the current directory. Use `--temp-root /path/to/work` to keep the same leaf directory name under a different parent.
 
@@ -199,7 +213,7 @@ Optional output flags:
 python3 scripts/merge_and_build.py --temp-dir book_temp --title "《translated title》" --cover cover.jpg --export-name "translated-title"
 ```
 
-`--cover` passes an explicit image to the EPUB Calibre step. `--export-name` creates alias copies such as `translated-title.epub` while preserving the canonical `book.*` pipeline artifacts.
+`--cover` passes an explicit image to the legacy EPUB Calibre step. `--export-name` creates alias copies such as `translated-title.epub` while preserving the canonical `book.*` pipeline artifacts. These options do not turn the legacy rebuild into a structure-preserving EPUB workflow.
 
 Before merging, the script validates:
 - Every source chunk has a corresponding output file (1:1 match)
@@ -215,6 +229,7 @@ Then: merge → Pandoc HTML → inject TOC → Calibre generates DOCX, EPUB, PDF
 | File | Purpose |
 |------|---------|
 | `SKILL.md` | Codex-compatible skill definition — orchestrates the full pipeline |
+| `references/translation-quality-and-epub-preservation-policy.md` | Mandatory translation-quality, EPUB-preservation, repair, and validation criteria |
 | `scripts/convert.py` | PDF/DOCX/EPUB → Markdown chunks via Calibre HTMLZ |
 | `scripts/manifest.py` | Chunk manifest: SHA-256 tracking and merge validation |
 | `scripts/glossary.py` | Glossary management: per-chunk term tables for consistent terminology |
@@ -238,6 +253,7 @@ Then: merge → Pandoc HTML → inject TOC → Calibre generates DOCX, EPUB, PDF
 | `Missing source chunk` | Source file deleted — re-run `convert.py` to regenerate |
 | Incomplete translation | Re-run the skill — it resumes from where it stopped |
 | Changed title/template/assets but output didn't update | Delete existing `output.md`, `book*.html`, `book.docx`, `book.epub`, `book.pdf` from the temp dir, then re-run `merge_and_build.py` |
+| Need to preserve or repair an original EPUB package | Do not run the Markdown rebuild silently. Invoke the skill's preservation/repair mode; until deterministic EPUB helpers are implemented, the skill must report unavailable capabilities or request explicit acceptance of legacy rebuild limitations. |
 | Want page-number footers stripped from PDF output | By default, monotonic page-number sequences (e.g. `1, 2, 3, ...`) are auto-detected and dropped while outliers like years (`1984`), chapter numbers, and citation indices stay preserved. If detection misses your case, pass `--strip-page-numbers` to `convert.py` to aggressively delete every standalone-digit line. The flag aborts if a cached `input.md` or `chunk*.md` already exists — delete them first so the flag actually takes effect. |
 | `output.md exists but manifest invalid` | Stale output — the script auto-deletes and re-merges |
 | `Glossary upgrade rejected: duplicate source` | v2 disallows two terms sharing a source/alias surface form. Edit `glossary.json` to disambiguate (e.g., rename one source from `Apple` to `Apple (Inc.)`) and reload. |
@@ -245,7 +261,7 @@ Then: merge → Pandoc HTML → inject TOC → Calibre generates DOCX, EPUB, PDF
 
 ## Roadmap
 
-Tracking [issue #7](https://github.com/deusyu/translate-book/issues/7) — name/term inconsistency and pronoun/gender errors across chunks. The pipeline now covers high-frequency entities, alias/spelling drift, adjacent-chunk pronoun context, and selective re-translation after glossary changes. Full-book organic validation remains a future quality pass. The plan is four independently shippable phases.
+Tracking [issue #7](https://github.com/deusyu/translate-book/issues/7) — name/term inconsistency and pronoun/gender errors across chunks. The pipeline now covers high-frequency entities, alias/spelling drift, adjacent-chunk pronoun context, and selective re-translation after glossary changes. The skill now requires a full-book consistency pass; deterministic full-book language validation remains future work. The plan is four independently shippable phases.
 
 ### Design principles
 
@@ -276,7 +292,8 @@ Phase 1 grows the glossary batch-by-batch, so the first batch sees the smallest 
 
 Recent PR discussions also surfaced several useful workflow improvements, but these are broader than one-off patches and touch repo contracts (artifact names, temp-dir behavior, cleanup semantics, or EPUB compatibility scope). Current status:
 
-- **Explicit EPUB cover support (shipped).** `merge_and_build.py --cover <image>` passes the image through the HTML -> EPUB Calibre step. `--cover-from <epub>` / EPUB cover auto-extraction remains out of scope until the project is ready to own EPUB parsing compatibility across different package layouts. (context: closed #3)
+- **Explicit legacy-rebuild EPUB cover support (shipped).** `merge_and_build.py --cover <image>` passes the image through the HTML → EPUB Calibre step. Automatic preservation/restoration of the input EPUB's package-level cover declarations belongs to the not-yet-implemented structure-preserving path. (context: closed #3)
+- **Deterministic structure-preserving EPUB tools (planned).** Implement XHTML text-node extraction/reinsertion, cover and metadata preservation, visible/navigation TOC repair, link validation, and standards-compliant package rebuilding.
 - **Configurable temp workspace location (shipped).** `convert.py --temp-root <dir>` keeps the default cwd-local `{book_name}_temp/` behavior unless explicitly overridden. (context: closed #4)
 - **Safer Calibre/Pandoc artifact cleanup (partly shipped).** Page-number and Calibre-marker cleanup is regression-tested, preserving years, chapter numbers, and non-monotonic standalone numbers. Continue improving cleanup incrementally under tests. (context: closed #5)
 - **Optional user-facing export names (shipped).** `merge_and_build.py --export-name <stem>` creates alias copies while preserving canonical pipeline artifacts as `book.html`, `book_doc.html`, `book.docx`, `book.epub`, and `book.pdf`. (context: closed #6)

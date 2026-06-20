@@ -7,7 +7,7 @@ Codex skill for translating complete PDF, DOCX, and EPUB books with parallel chu
 - Support resumable, validated, multi-format builds.
 - Produce publication-quality prose while preserving author voice, navigation, covers, metadata, and links.
 ## Core Features
-Conversion, chunking, glossary injection, neighbor context, selective re-translation, manifest validation, and HTML/DOCX/EPUB/PDF output.
+Implemented legacy conversion/rebuild with chunking, glossary injection, neighbor context, selective re-translation, manifest validation, and HTML/DOCX/EPUB/PDF output; plus policy-level structure-preserving EPUB translation and repair routing whose deterministic helpers remain planned.
 ## Important Constraints
 - Use only `chunk*.md` source naming.
 - Keep `{baseDir}` in skill script paths.
